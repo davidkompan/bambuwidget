@@ -1,0 +1,10 @@
+# Build output and dependencies
+node_modules/
+android/build/
+*.apk
+*.zip
+# Signing keys and secrets: never commit
+*.keystore
+*.jks
+*.p12
+.env

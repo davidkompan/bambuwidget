@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>Bambu Widget</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <span class="title">Printers</span>
+    <span id="conn" class="conn" title=""></span>
+    <span class="spacer"></span>
+    <button id="pin" class="icon" title="Always on top">📌</button>
+    <button id="close" class="icon" title="Hide to tray">✕</button>
+  </header>
+
+  <main id="main" hidden>
+    <div id="notice" class="notice" hidden></div>
+    <div id="list"></div>
+  </main>
+
+  <section id="login" class="login" hidden>
+    <form id="f-login">
+      <h2>Sign in to Bambu Lab</h2>
+      <label>Email<input id="email" type="email" autocomplete="username" required></label>
+      <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
+      <label>Region
+        <select id="region"><option value="global">Global (EU, US, …)</option><option value="china">China</option></select>
+      </label>
+      <button type="submit" class="primary">Sign in</button>
+      <a href="#" id="to-token" class="link">Signing in with Google/Apple? Use a token</a>
+    </form>
+    <form id="f-code" hidden>
+      <h2 id="code-title">Verification code</h2>
+      <p id="code-hint" class="hint"></p>
+      <label>Code<input id="code" inputmode="numeric" autocomplete="one-time-code" required></label>
+      <button type="submit" class="primary">Verify</button>
+      <a href="#" id="resend" class="link">Send a new code</a>
+      <a href="#" class="link back">Back</a>
+    </form>
+    <form id="f-token" hidden>
+      <h2>Sign in with a token</h2>
+      <p class="hint">Sign in at bambulab.com in your browser, open the developer tools (F12), go to Application › Cookies and copy the value of the <b>token</b> cookie.</p>
+      <label>Token<textarea id="token" rows="4" required></textarea></label>
+      <label>Region
+        <select id="region2"><option value="global">Global</option><option value="china">China</option></select>
+      </label>
+      <button type="submit" class="primary">Use token</button>
+      <a href="#" class="link back">Back</a>
+    </form>
+    <p id="login-error" class="error-text"></p>
+  </section>
+
+  <template id="t-card">
+    <article class="card">
+      <div class="row head">
+        <span class="dot"></span>
+        <span class="name"></span>
+        <span class="model"></span>
+        <span class="spacer"></span>
+        <span class="label"></span>
+      </div>
+      <div class="file"></div>
+      <div class="progress"><div class="fill"></div><span class="pct"></span></div>
+      <div class="row meta"></div>
+      <div class="errors"></div>
+      <div class="row actions">
+        <button data-cmd="pause">⏸ Pause</button>
+        <button data-cmd="resume">▶ Resume</button>
+        <button data-cmd="stop" class="danger">■ Stop</button>
+        <button data-cmd="clear" class="warn">✓ Error resolved</button>
+      </div>
+      <div class="reply"></div>
+      <div class="locked" hidden title="This printer's firmware accepts only commands signed by Bambu Lab software. Pause, stop or clear errors in Bambu Handy, Bambu Studio (Device tab) or on the printer screen.">
+        Read-only: control via Bambu Handy or Studio. <a href="#" class="retry">Retry</a>
+      </div>
+    </article>
+  </template>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

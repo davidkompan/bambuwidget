@@ -43,7 +43,7 @@ network as your computer or phone.
 
 ## Install
 
-Download the files from the [Releases](../../releases) page.
+Download the files from the [Releases](https://github.com/davidkompan/bambuwidget/releases/latest) page.
 
 ### Windows
 1. Download `BambuWidget-windows.zip` and extract it.

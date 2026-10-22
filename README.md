@@ -104,3 +104,7 @@ Nothing is sent anywhere except Bambu Lab's own servers.
 Sign-in flow based on [bambu-taskbar](https://github.com/Dawn-Of-Justice/bambu-taskbar), error texts and wiki links
 from [ha-bambulab](https://github.com/greghesp/ha-bambulab); details in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 Not affiliated with or endorsed by Bambu Lab.
+
+## License
+
+[MIT](LICENSE). Third-party components keep their own licenses, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

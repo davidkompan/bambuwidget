@@ -125,9 +125,6 @@ Nothing is sent anywhere except Bambu Lab's own servers.
 
 * **Windows:** `cd windows && npm install && npx electron .`
 * **Android:** see [android/README.md](android/README.md).
-* **Release:** bump the version in `windows/package.json` and add `docs/release-notes/v<version>.md`; pushing it
-  (or a `v*` tag) runs the workflow, which builds both files and publishes the release with those notes. To sign the APK with your own key, add the repository secrets
-  `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.keystore`) and `ANDROID_KEYSTORE_PASSWORD`.
 
 ## Credits
 

@@ -45,13 +45,15 @@ jobs:
           if [ -n "$KEYSTORE" ]; then
             echo "$KEYSTORE" | base64 -d > android/release.keystore
           else
-            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set: the APK is signed with a new key and cannot update an installed copy signed with another key."
+            # A new key would make the APK impossible to install over the existing app.
+            echo "::error::Add the repository secrets ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD (see README)."
+            exit 1
           fi
 
       - name: Build APK
         if: steps.version.outputs.skip != 'true'
         env:
-          BW_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'bambuwidget-temporary' }}
+          BW_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           android/build.sh
           cp android/build/BambuWidget.apk BambuWidget-android.apk

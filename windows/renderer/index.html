@@ -8,9 +8,10 @@
 </head>
 <body>
   <header class="bar">
-    <span class="title">Printers</span>
+    <span class="title" id="title">Printers</span>
     <span id="conn" class="conn" title=""></span>
     <span class="spacer"></span>
+    <button id="gear" class="icon" title="Settings">⚙</button>
     <button id="pin" class="icon" title="Always on top">📌</button>
     <button id="close" class="icon" title="Hide to tray">✕</button>
   </header>
@@ -20,9 +21,20 @@
     <div id="list"></div>
   </main>
 
+  <section id="settings" class="settings" hidden>
+    <h3>Printers</h3>
+    <p class="hint">Tick the printers to show and use the arrows to change their order.</p>
+    <div id="s-printers"></div>
+    <h3>Accounts</h3>
+    <p class="hint">Printers of all accounts are shown together.</p>
+    <div id="s-accounts"></div>
+    <button id="add-account" class="primary">+ Add account</button>
+    <button id="settings-done" class="secondary">Done</button>
+  </section>
+
   <section id="login" class="login" hidden>
     <form id="f-login">
-      <h2>Sign in to Bambu Lab</h2>
+      <h2 class="login-title">Sign in to Bambu Lab</h2>
       <label>Email<input id="email" type="email" autocomplete="username" required></label>
       <label>Password<input id="password" type="password" autocomplete="current-password" required></label>
       <label>Region
@@ -30,6 +42,7 @@
       </label>
       <button type="submit" class="primary">Sign in</button>
       <a href="#" id="to-token" class="link">Signing in with Google/Apple? Use a token</a>
+      <a href="#" class="link cancel-add">Cancel</a>
     </form>
     <form id="f-code" hidden>
       <h2 id="code-title">Verification code</h2>
@@ -46,6 +59,7 @@
       <label>Region
         <select id="region2"><option value="global">Global</option><option value="china">China</option></select>
       </label>
+      <label>Account name (optional)<input id="token-label" placeholder="e.g. Work"></label>
       <button type="submit" class="primary">Use token</button>
       <a href="#" class="link back">Back</a>
     </form>

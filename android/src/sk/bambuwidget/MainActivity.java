@@ -1,6 +1,8 @@
 package sk.bambuwidget;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.Intent;
@@ -29,12 +31,19 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.DateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
+import java.util.Set;
 
 /** Sign-in and a simple status list; the widget itself lives on the home screen. */
 public class MainActivity extends Activity {
     private LinearLayout root;
     private boolean dark;
+    /** On a sign-in screen: kept when the user switches to the mail / authenticator app and back. */
+    private boolean signingIn;
+    /** Sign-in opened from Accounts › Add account (can be cancelled). */
+    private boolean adding;
     private int fg, muted;
 
     /** Dark or light, from the app setting or (for "system") the phone's night mode. */
@@ -67,7 +76,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (Store.session(this) == null) showLogin(null); else showStatus();
+        if (signingIn) return;
+        if (!Store.signedIn(this)) showLogin(Store.accounts(this).isEmpty() ? null : "Your sign-in has expired. Please sign in again.");
+        else showStatus();
     }
 
     // ---------- UI helpers ----------
@@ -128,16 +139,29 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void signedIn(Cloud.Session s) {
-        Store.saveSession(this, s);
+    private void signedIn(Cloud.Session s, String label) {
+        Store.addAccount(this, s, label);
+        adding = false;
         Updater.schedule(this);
+        Store.setRefreshing(this, true);
         refreshNow();
+    }
+
+    /** Cancel button on the sign-in screens while adding a further account. */
+    private void cancelButton() {
+        if (!adding || !Store.signedIn(this)) return;
+        button("Cancel", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { adding = false; showStatus(); }
+        });
     }
 
     // ---------- screens ----------
     private void showLogin(String message) {
         root.removeAllViews();
-        text("Sign in to Bambu Lab", 20, fg, true);
+        signingIn = true;
+        text(adding ? "Add a Bambu Lab account" : "Sign in to Bambu Lab", 20, fg, true);
+        if (adding) text("Printers of all accounts are shown together in the widget.", 14, muted, false);
         final EditText email = field("Email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         final EditText password = field("Password", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         final CheckBox china = new CheckBox(this);
@@ -156,7 +180,7 @@ public class MainActivity extends Activity {
                     }
                 }, new Runnable() {
                     public void run() {
-                        if (out[0] != null) { signedIn(out[0]); showStatus(); }
+                        if (out[0] != null) { signedIn(out[0], login.email); showStatus(); }
                         else showCode(login.need);
                     }
                 });
@@ -166,6 +190,7 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) { showToken(); }
         });
+        cancelButton();
         error.setTextColor(0xFFDC3C3C);
         error.setPadding(0, dp(10), 0, 0);
         if (message != null) error.setText(message);
@@ -174,6 +199,7 @@ public class MainActivity extends Activity {
 
     private void showCode(final String kind) {
         root.removeAllViews();
+        signingIn = true;
         boolean email = "code".equals(kind);
         text(email ? "Code from email" : "Authenticator code", 20, fg, true);
         text(email ? "Bambu Lab has emailed you a one-time code." : "Enter the current code from your authenticator app (2FA).", 14, muted, false);
@@ -189,7 +215,7 @@ public class MainActivity extends Activity {
                         out[0] = "code".equals(kind) ? login.verifyCode(code.getText().toString()) : login.verifyTfa(code.getText().toString());
                     }
                 }, new Runnable() {
-                    public void run() { signedIn(out[0]); showStatus(); }
+                    public void run() { signedIn(out[0], login.email); showStatus(); }
                 });
             }
         });
@@ -203,6 +229,7 @@ public class MainActivity extends Activity {
 
     private void showToken() {
         root.removeAllViews();
+        signingIn = true;
         text("Sign in with a token", 20, fg, true);
         text("Use this if you sign in to Bambu Lab with Google or Apple, or if the normal sign-in is blocked. "
                 + "The token is the key your browser receives after signing in at bambulab.com. "
@@ -221,6 +248,7 @@ public class MainActivity extends Activity {
         china.setText("China account (bambulab.cn)");
         china.setTextColor(muted);
         root.addView(china);
+        final EditText name = field("Account name (optional, e.g. Work)", InputType.TYPE_CLASS_TEXT);
         final TextView error = new TextView(this);
         final Button go = button("Use token", null);
         go.setOnClickListener(new View.OnClickListener() {
@@ -232,7 +260,7 @@ public class MainActivity extends Activity {
                         out[0] = Cloud.fromToken(china.isChecked() ? "china" : "global", token.getText().toString(), 0);
                     }
                 }, new Runnable() {
-                    public void run() { signedIn(out[0]); showStatus(); }
+                    public void run() { signedIn(out[0], name.getText().toString()); showStatus(); }
                 });
             }
         });
@@ -250,7 +278,7 @@ public class MainActivity extends Activity {
             public void run() {
                 runOnUiThread(new Runnable() {
                     @Override
-                    public void run() { if (Store.session(MainActivity.this) != null) showStatus(); }
+                    public void run() { if (!signingIn && Store.signedIn(MainActivity.this)) showStatus(); }
                 });
             }
         });
@@ -281,9 +309,11 @@ public class MainActivity extends Activity {
 
     private void showStatus() {
         root.removeAllViews();
+        signingIn = false;
+        adding = false;
         text("Bambu Widget", 20, fg, true);
 
-        JSONArray ps = Store.printers(this);
+        JSONArray ps = Store.shownPrinters(this);
         for (int i = 0; i < ps.length(); i++) {
             JSONObject p = ps.optJSONObject(i);
             if (p == null) continue;
@@ -306,6 +336,14 @@ public class MainActivity extends Activity {
         });
         text("Add the widget to your home screen: long-press an empty spot, choose Widgets, then Bambu Widget. "
                 + "Tap the widget to update it now, tap \"Printers\" to open this app.", 13, muted, false);
+
+        // ---- printers shown ----
+        heading("Printers in the widget");
+        text("Tick the printers to show in the widget and the notification; the arrows change their order.", 13, muted, false);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        root.addView(box);
+        fillPrinters(box);
 
         // ---- update frequency ----
         heading("Update frequency");
@@ -411,17 +449,145 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ---- account ----
-        heading("Account");
-        button("Sign out", new View.OnClickListener() {
+        // ---- accounts ----
+        heading("Accounts");
+        text("Printers of all accounts are shown together. Add an account to also see printers bound to another "
+                + "Bambu Lab account (for example a work account).", 13, muted, false);
+        final List<Cloud.Session> accounts = Store.accounts(this);
+        JSONArray all = Store.printers(this);
+        for (final Cloud.Session a : accounts) {
+            int count = 0;
+            for (int i = 0; i < all.length(); i++) if (a.id.equals(all.optJSONObject(i).optString("accountId"))) count++;
+            text(a.label, 15, fg, true).setPadding(0, dp(10), 0, 0);
+            TextView sub = text(("china".equals(a.region) ? "China" : "Global") + " \u00B7 "
+                    + (a.expired ? "sign-in expired" : count + (count == 1 ? " printer" : " printers")), 13, a.expired ? 0xFFDC3C3C : muted, false);
+            sub.setPadding(0, 0, 0, 0);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            root.addView(row);
+            if (a.expired) {
+                row.addView(smallButton("Sign in again", new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) { adding = true; showLogin(null); }
+                }));
+            }
+            row.addView(smallButton("Remove", new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setMessage("Remove " + a.label + " and its printers from Bambu Widget?")
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Remove", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface d, int w) {
+                                    Store.removeAccount(MainActivity.this, a.id);
+                                    changedAccounts();
+                                }
+                            }).show();
+                }
+            }));
+        }
+        button("Add account", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { adding = true; showLogin(null); }
+        });
+        button(accounts.size() > 1 ? "Sign out of all accounts" : "Sign out", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 Store.signOut(MainActivity.this);
-                Updater.schedule(MainActivity.this);
-                Notifier.cancel(MainActivity.this);
-                WidgetProvider.updateAll(MainActivity.this);
-                showLogin(null);
+                changedAccounts();
             }
         });
+    }
+
+    /** After removing accounts: reschedule, redraw the widget and notification, show the right screen. */
+    private void changedAccounts() {
+        Updater.schedule(this);
+        WidgetProvider.updateAll(this);
+        if (Store.signedIn(this)) { Notifier.update(this); showStatus(); }
+        else { Notifier.cancel(this); showLogin(null); }
+    }
+
+    private Button smallButton(String label, View.OnClickListener l) {
+        Button b = new Button(this, null, android.R.attr.borderlessButtonStyle);
+        b.setText(label);
+        b.setTextColor(0xFF388BFD);
+        b.setAllCaps(false);
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    /** One row per printer: show / hide check box and up / down arrows. */
+    private void fillPrinters(final LinearLayout box) {
+        box.removeAllViews();
+        final JSONArray all = Store.printers(this);
+        Set<String> hidden = Store.hidden(this);
+        boolean multi = Store.accounts(this).size() > 1;
+        if (all.length() == 0) {
+            TextView t = new TextView(this);
+            t.setText("No printers loaded yet. Tap Update now.");
+            t.setTextColor(muted);
+            box.addView(t);
+            return;
+        }
+        for (int i = 0; i < all.length(); i++) {
+            final JSONObject p = all.optJSONObject(i);
+            final int index = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            CheckBox cb = new CheckBox(this);
+            String sub = p.optString("model");
+            if (multi && p.optString("account").length() > 0) sub += (sub.length() > 0 ? " \u00B7 " : "") + p.optString("account");
+            cb.setText(p.optString("name") + (sub.length() > 0 ? "\n" + sub : ""));
+            cb.setTextColor(fg);
+            cb.setChecked(!hidden.contains(p.optString("serial")));
+            cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(CompoundButton b, boolean on) {
+                    Store.setHidden(MainActivity.this, p.optString("serial"), !on);
+                    printersChanged(box);
+                }
+            });
+            row.addView(cb, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            row.addView(arrow("\u25B2", i > 0, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) { move(all, index, -1, box); }
+            }));
+            row.addView(arrow("\u25BC", i < all.length() - 1, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) { move(all, index, 1, box); }
+            }));
+            box.addView(row);
+        }
+    }
+
+    private Button arrow(String label, boolean enabled, View.OnClickListener l) {
+        Button b = new Button(this, null, android.R.attr.borderlessButtonStyle);
+        b.setText(label);
+        b.setTextColor(enabled ? fg : (muted & 0x00FFFFFF) | 0x40000000);
+        b.setEnabled(enabled);
+        b.setMinWidth(0);
+        b.setMinimumWidth(dp(44));
+        b.setOnClickListener(l);
+        return b;
+    }
+
+    private void move(JSONArray all, int index, int delta, LinearLayout box) {
+        List<String> order = new ArrayList<String>();
+        for (int i = 0; i < all.length(); i++) order.add(all.optJSONObject(i).optString("serial"));
+        int j = index + delta;
+        if (j < 0 || j >= order.size()) return;
+        String s = order.get(index);
+        order.set(index, order.get(j));
+        order.set(j, s);
+        Store.setOrder(this, order);
+        printersChanged(box);
+    }
+
+    private void printersChanged(LinearLayout box) {
+        fillPrinters(box);
+        WidgetProvider.updateAll(this);
+        Notifier.update(this);
     }
 }

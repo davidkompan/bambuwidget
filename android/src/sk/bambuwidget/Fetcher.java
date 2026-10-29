@@ -7,9 +7,11 @@ import org.json.JSONObject;
 
 import java.net.SocketTimeoutException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** One refresh: printer list over HTTPS, one status snapshot per printer over Bambu Cloud MQTT. */
 final class Fetcher {
@@ -18,24 +20,56 @@ final class Fetcher {
 
     static final String BLUE = "blue", GREEN = "green", AMBER = "amber", RED = "red", GREY = "grey";
 
+    /** Fetches every signed-in account; a printer shared with several accounts is listed once. */
     static synchronized void refresh(Context ctx) {
-        Cloud.Session s = Store.session(ctx);
-        if (s == null) { Store.saveStatus(ctx, null, "Open Bambu Widget and sign in."); return; }
-        try {
-            List<Cloud.Printer> printers = Cloud.listPrinters(s);
-            Map<String, JSONObject> fields = new HashMap<String, JSONObject>();
-            int online = 0;
-            for (Cloud.Printer p : printers) if (p.online) online++;
-            if (online > 0) collect(s, printers, fields, online);
-
-            JSONArray out = new JSONArray();
-            for (Cloud.Printer p : printers) out.put(derive(p, fields.get(p.serial)));
-            Store.saveStatus(ctx, out, "");
-        } catch (Cloud.AuthException | MiniMqtt.AuthException e) {
-            Store.saveStatus(ctx, null, "Sign-in expired. Open Bambu Widget and sign in again.");
-        } catch (Exception e) {
-            Store.saveStatus(ctx, null, "Update failed: " + e.getMessage());
+        List<Cloud.Session> accounts = Store.accounts(ctx);
+        if (!Store.signedIn(ctx)) { Store.saveStatus(ctx, null, "Open Bambu Widget and sign in."); return; }
+        boolean multi = accounts.size() > 1, fetched = false;
+        JSONArray previous = Store.printers(ctx);
+        JSONArray out = new JSONArray();
+        Set<String> seen = new HashSet<String>();
+        StringBuilder msg = new StringBuilder();
+        for (Cloud.Session s : accounts) {
+            String prefix = multi ? s.label + ": " : "";
+            if (s.expired) {
+                line(msg, prefix + "Sign-in expired. Open Bambu Widget and sign in again.");
+                keep(previous, s.id, out, seen);
+                continue;
+            }
+            try {
+                List<Cloud.Printer> printers = Cloud.listPrinters(s);
+                Map<String, JSONObject> fields = new HashMap<String, JSONObject>();
+                int online = 0;
+                for (Cloud.Printer p : printers) if (p.online) online++;
+                if (online > 0) collect(s, printers, fields, online);
+                for (Cloud.Printer p : printers) {
+                    if (seen.add(p.serial)) out.put(derive(p, fields.get(p.serial)).put("account", s.label).put("accountId", s.id));
+                }
+                fetched = true;
+            } catch (Cloud.AuthException | MiniMqtt.AuthException e) {
+                Store.expire(ctx, s.id);
+                line(msg, prefix + "Sign-in expired. Open Bambu Widget and sign in again.");
+                keep(previous, s.id, out, seen);
+            } catch (Exception e) {
+                line(msg, prefix + "Update failed: " + e.getMessage());
+                keep(previous, s.id, out, seen);
+            }
         }
+        // Nothing new at all: keep the last statuses and their time.
+        Store.saveStatus(ctx, fetched ? out : null, msg.toString());
+    }
+
+    /** Keeps an account's last known printers when it could not be updated. */
+    private static void keep(JSONArray previous, String accountId, JSONArray out, Set<String> seen) {
+        for (int i = 0; i < previous.length(); i++) {
+            JSONObject p = previous.optJSONObject(i);
+            if (p != null && accountId.equals(p.optString("accountId")) && seen.add(p.optString("serial"))) out.put(p);
+        }
+    }
+
+    private static void line(StringBuilder b, String s) {
+        if (b.length() > 0) b.append('\n');
+        b.append(s);
     }
 
     private static void collect(Cloud.Session s, List<Cloud.Printer> printers, Map<String, JSONObject> fields, int online) throws Exception {

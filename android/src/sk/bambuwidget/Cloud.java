@@ -23,6 +23,9 @@ final class Cloud {
     static final class Session {
         String region = "global", token = "", username = "";
         long expiresAt;
+        /** Set once the session is stored as an account: region + username, a name the user recognizes. */
+        String id = "", label = "";
+        boolean expired;
     }
 
     static final class Printer {

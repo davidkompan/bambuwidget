@@ -41,7 +41,7 @@ final class Updater {
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         js.cancel(JOB_ID);
         am.cancel(alarmIntent(c));
-        if (Store.session(c) == null) return;
+        if (!Store.signedIn(c)) return;
         int min = Store.interval(c);
         if (min >= 15) {
             js.schedule(new JobInfo.Builder(JOB_ID, new ComponentName(c, RefreshJob.class))
@@ -57,7 +57,7 @@ final class Updater {
     /** Next alarm for intervals below 15 minutes; each alarm schedules the following one. */
     static void scheduleAlarm(Context c) {
         int min = Store.interval(c);
-        if (min <= 0 || min >= 15 || Store.session(c) == null) return;
+        if (min <= 0 || min >= 15 || !Store.signedIn(c)) return;
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + min * 60000L, alarmIntent(c));
     }

@@ -2,10 +2,16 @@
 const $ = (id) => document.getElementById(id);
 const cards = new Map(); // serial -> element
 let current = null;
+let settingsOpen = false;
+let onLogin = false;
 
 // ---------- header ----------
 $('close').onclick = () => window.bw.hide();
 $('pin').onclick = () => window.bw.setAlwaysOnTop(!(current && current.alwaysOnTop));
+$('gear').onclick = () => { settingsOpen = !settingsOpen; if (current) render(current); };
+$('settings-done').onclick = () => { settingsOpen = false; if (current) render(current); };
+$('add-account').onclick = () => window.bw.addAccount();
+window.bw.onOpenSettings(() => { settingsOpen = true; if (current) render(current); });
 
 // ---------- login ----------
 const forms = ['f-login', 'f-code', 'f-token'];
@@ -30,10 +36,11 @@ async function run(form, fn) {
 
 $('f-login').onsubmit = (e) => { e.preventDefault(); run(e.target, () => window.bw.login($('email').value, $('password').value, $('region').value)); };
 $('f-code').onsubmit = (e) => { e.preventDefault(); run(e.target, () => (codeMode === 'code' ? window.bw.verifyCode($('code').value) : window.bw.verifyTfa($('code').value))); };
-$('f-token').onsubmit = (e) => { e.preventDefault(); run(e.target, () => window.bw.useToken($('token').value, $('region2').value)); };
+$('f-token').onsubmit = (e) => { e.preventDefault(); run(e.target, () => window.bw.useToken($('token').value, $('region2').value, $('token-label').value)); };
 $('to-token').onclick = (e) => { e.preventDefault(); showForm('f-token'); };
 $('resend').onclick = async (e) => { e.preventDefault(); const r = await window.bw.resendCode(); $('login-error').textContent = r.status === 'error' ? r.message : 'A new code has been sent.'; };
 document.querySelectorAll('.back').forEach((a) => { a.onclick = (e) => { e.preventDefault(); showForm('f-login'); }; });
+document.querySelectorAll('.cancel-add').forEach((a) => { a.onclick = (e) => { e.preventDefault(); window.bw.cancelAdd(); }; });
 
 // ---------- printers ----------
 const fmtTime = (min) => {
@@ -71,7 +78,7 @@ function renderCard(el, p) {
   el.className = `card s-${p.state}${p.errors.some((e) => e.severity === 'fatal' || e.severity === 'serious') ? ' has-error' : ''}`;
   el.querySelector('.name').textContent = p.name;
   el.querySelector('.name').title = p.serial;
-  el.querySelector('.model').textContent = p.model || '';
+  el.querySelector('.model').textContent = [p.model, current && current.multi ? p.account : null].filter(Boolean).join(' · ');
   el.querySelector('.label').textContent = p.stage && p.state !== 'printing' ? p.stage : p.label;
   el.querySelector('.file').textContent = p.file || '';
 
@@ -113,18 +120,98 @@ function renderCard(el, p) {
   r.className = `reply${fresh && p.reply.ok === true ? ' ok' : ''}${fresh && p.reply.ok === false ? ' bad' : ''}`;
 }
 
+// ---------- settings ----------
+function savePrinters(all) {
+  window.bw.setPrinters(all.map((p) => p.serial), all.filter((p) => p.hidden).map((p) => p.serial));
+}
+
+let settingsKey = null;
+function renderSettings(v) {
+  // Rebuilt only when something in it changed, so a pending "Really remove?" survives status updates.
+  const key = JSON.stringify([v.all, v.accounts]);
+  if (key === settingsKey) return;
+  settingsKey = key;
+  const all = (v.all || []).map((p) => ({ ...p }));
+  $('s-printers').replaceChildren(...all.map((p, i) => {
+    const row = document.createElement('div');
+    row.className = 's-row';
+    const box = document.createElement('input');
+    box.type = 'checkbox'; box.checked = !p.hidden; box.title = 'Show in the widget';
+    box.onchange = () => { all[i].hidden = !box.checked; savePrinters(all); };
+    const txt = document.createElement('label');
+    txt.className = 's-text';
+    const name = document.createElement('span'); name.className = 's-name'; name.textContent = p.name;
+    const sub = document.createElement('span'); sub.className = 's-sub';
+    sub.textContent = [p.model, v.accounts && v.accounts.length > 1 ? p.account : null].filter(Boolean).join(' · ');
+    txt.append(name, sub);
+    txt.onclick = () => box.click();
+    const move = (d) => {
+      const j = i + d;
+      if (j < 0 || j >= all.length) return;
+      [all[i], all[j]] = [all[j], all[i]];
+      savePrinters(all);
+    };
+    const up = document.createElement('button'); up.className = 'icon'; up.textContent = '▲'; up.title = 'Move up'; up.disabled = i === 0; up.onclick = () => move(-1);
+    const down = document.createElement('button'); down.className = 'icon'; down.textContent = '▼'; down.title = 'Move down'; down.disabled = i === all.length - 1; down.onclick = () => move(1);
+    row.append(box, txt, up, down);
+    return row;
+  }));
+  if (!all.length) $('s-printers').textContent = 'No printers loaded yet.';
+
+  const status = { online: 'Connected', connecting: 'Connecting…', offline: 'Offline', expired: 'Sign-in expired' };
+  $('s-accounts').replaceChildren(...(v.accounts || []).map((a) => {
+    const row = document.createElement('div');
+    row.className = `s-row acc ${a.status}`;
+    const txt = document.createElement('div');
+    txt.className = 's-text';
+    const name = document.createElement('span'); name.className = 's-name'; name.textContent = a.label;
+    const sub = document.createElement('span'); sub.className = 's-sub';
+    sub.textContent = [a.region === 'china' ? 'China' : 'Global', status[a.status] || a.status,
+      a.status === 'expired' ? null : `${a.printers} printer${a.printers === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
+    txt.append(name, sub);
+    row.append(txt);
+    if (a.status === 'expired') {
+      const again = document.createElement('button'); again.className = 'small'; again.textContent = 'Sign in';
+      again.onclick = () => window.bw.addAccount();
+      row.append(again);
+    }
+    const rm = document.createElement('button'); rm.className = 'small danger'; rm.textContent = 'Remove';
+    rm.onclick = () => {
+      if (!rm.classList.contains('armed')) {
+        rm.classList.add('armed'); rm.textContent = 'Really remove?';
+        setTimeout(() => { rm.classList.remove('armed'); rm.textContent = 'Remove'; }, 4000);
+        return;
+      }
+      window.bw.removeAccount(a.id);
+    };
+    row.append(rm);
+    return row;
+  }));
+}
+
 function render(v) {
   current = v;
   $('pin').classList.toggle('on', !!v.alwaysOnTop);
   const loginScreen = v.screen === 'login';
+  const showSettings = settingsOpen && !loginScreen;
   $('login').hidden = !loginScreen;
-  $('main').hidden = loginScreen;
+  $('main').hidden = loginScreen || showSettings;
+  $('settings').hidden = !showSettings;
+  $('gear').hidden = loginScreen;
+  $('gear').classList.toggle('on', showSettings);
+  $('title').textContent = loginScreen ? (v.adding ? 'Add account' : 'Printers') : showSettings ? 'Settings' : 'Printers';
   if (loginScreen) {
-    if ($('f-code').hidden && $('f-token').hidden) showForm('f-login');
+    // Reset the forms only when the sign-in screen opens, not on every status update behind it.
+    if (!onLogin) { showForm('f-login'); ['password', 'token', 'token-label'].forEach((id) => { $(id).value = ''; }); }
+    onLogin = true;
+    document.querySelectorAll('.cancel-add').forEach((a) => { a.hidden = !v.adding; });
+    $('f-login').querySelector('.login-title').textContent = v.adding ? 'Sign in to another Bambu Lab account' : 'Sign in to Bambu Lab';
     if (v.message) $('login-error').textContent = v.message;
     $('conn').className = 'conn';
     return;
   }
+  if (onLogin) { onLogin = false; settingsOpen = settingsOpen && (v.accounts || []).length > 0; }
+  if (showSettings) renderSettings(v); else settingsKey = null;
   $('conn').className = `conn ${v.connection || ''}`;
   $('conn').title = v.connection === 'online' ? 'Connected to Bambu Cloud' : (v.message || '');
   $('notice').hidden = !v.message;

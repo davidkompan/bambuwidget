@@ -50,7 +50,7 @@ public class WidgetProvider extends AppWidgetProvider {
         v.removeAllViews(R.id.rows);
         int rowLayout = Views.rowLayout(c);
 
-        JSONArray ps = Store.printers(c);
+        JSONArray ps = Store.shownPrinters(c);
         for (int i = 0; i < ps.length(); i++) {
             JSONObject p = ps.optJSONObject(i);
             if (p != null) v.addView(R.id.rows, Views.row(c, rowLayout, p, true));
@@ -61,7 +61,8 @@ public class WidgetProvider extends AppWidgetProvider {
         v.setTextViewText(R.id.updated, updated);
 
         String msg = Store.message(c);
-        if (Store.session(c) == null) msg = "Tap to open Bambu Widget and sign in.";
+        if (!Store.signedIn(c)) msg = "Tap to open Bambu Widget and sign in.";
+        else if (ps.length() == 0 && msg.length() == 0 && Store.printers(c).length() > 0) msg = "All printers are hidden. Open Bambu Widget to choose which to show.";
         else if (ps.length() == 0 && msg.length() == 0) msg = Store.refreshing(c) ? "Loading printers\u2026" : "No printers yet. Tap to update.";
         v.setTextViewText(R.id.message, msg);
         v.setViewVisibility(R.id.message, msg.length() > 0 ? View.VISIBLE : View.GONE);
@@ -71,7 +72,7 @@ public class WidgetProvider extends AppWidgetProvider {
         Intent r = new Intent(c, WidgetProvider.class).setAction(ACTION_REFRESH);
         PendingIntent refresh = PendingIntent.getBroadcast(c, 1, r, flags);
         v.setOnClickPendingIntent(R.id.header, open);
-        v.setOnClickPendingIntent(R.id.root, Store.session(c) == null ? open : refresh);
+        v.setOnClickPendingIntent(R.id.root, Store.signedIn(c) ? refresh : open);
 
         m.updateAppWidget(ids, v);
     }

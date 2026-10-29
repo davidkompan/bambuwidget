@@ -119,14 +119,14 @@ Nothing is sent anywhere except Bambu Lab's own servers.
 | `windows/` | Electron app (JavaScript), installer scripts |
 | `android/` | Android app (Java, no Gradle), build script |
 | `docs/images/` | Screenshots |
-| `.github/workflows/release.yml` | Builds the APK and the Windows zip and publishes a release when a `v*` tag is pushed |
+| `.github/workflows/release.yml` | Builds the APK and the Windows zip and publishes the release |
 
 ### Building
 
 * **Windows:** `cd windows && npm install && npx electron .`
 * **Android:** see [android/README.md](android/README.md).
-* **Release:** push a tag such as `v1.1.0`; the workflow attaches both files to the release, with the notes from
-  `docs/release-notes/<tag>.md`. To sign the APK with your own key, add the repository secrets
+* **Release:** bump the version in `windows/package.json` and add `docs/release-notes/v<version>.md`; pushing it
+  (or a `v*` tag) runs the workflow, which builds both files and publishes the release with those notes. To sign the APK with your own key, add the repository secrets
   `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.keystore`) and `ANDROID_KEYSTORE_PASSWORD`.
 
 ## Credits

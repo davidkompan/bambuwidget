@@ -15,11 +15,16 @@ const LOGIN_ITEM = { path: process.execPath, args: app.isPackaged ? [] : [path.r
 
 let win = null;
 let tray = null;
-let hub = null;
 let login = null;
 let view = { screen: 'login', connection: null, message: null, printers: [] };
-let settings = { bounds: null, alwaysOnTop: false, notify: true, locked: [] };
+// order: serials in display order; hidden: serials not shown in the widget.
+let settings = { bounds: null, alwaysOnTop: false, notify: true, locked: [], order: [], hidden: [] };
 const previous = new Map();
+let accounts = [];        // {id, region, token, username, label, expiresAt, expired}
+const runs = new Map();   // account id -> {hub, view, retry}
+let locked = new Set();   // shared by all hubs
+let adding = false;       // sign-in screen opened from Settings › Add account
+let loginMessage = null;
 
 // ---------- persistence ----------
 function loadSettings() {
@@ -28,19 +33,29 @@ function loadSettings() {
 function saveSettings() {
   try { fs.writeFileSync(file('settings.json'), JSON.stringify(settings, null, 2)); } catch (_) { /* ignore */ }
 }
-function saveSession(s) {
-  const data = JSON.stringify(s);
-  const buf = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(data) : Buffer.from(data, 'utf8');
-  fs.writeFileSync(file('session.bin'), buf);
-}
-function loadSession() {
+function readSecret(n) {
   try {
-    const buf = fs.readFileSync(file('session.bin'));
-    const s = JSON.parse(safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf8'));
-    return s && s.token && s.expiresAt > Date.now() ? s : null;
+    const buf = fs.readFileSync(file(n));
+    return JSON.parse(safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(buf) : buf.toString('utf8'));
   } catch (_) { return null; }
 }
-function clearSession() { try { fs.unlinkSync(file('session.bin')); } catch (_) { /* none */ } }
+function saveAccounts() {
+  const data = JSON.stringify(accounts);
+  const buf = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(data) : Buffer.from(data, 'utf8');
+  try { fs.writeFileSync(file('accounts.bin'), buf); } catch (_) { /* ignore */ }
+}
+function loadAccounts() {
+  let list = readSecret('accounts.bin');
+  if (!Array.isArray(list)) {
+    // Version 1.0 kept a single session in session.bin.
+    const s = readSecret('session.bin');
+    list = s && s.token ? [{ ...s, id: accountId(s), label: s.username }] : [];
+    if (list.length) { accounts = list; saveAccounts(); }
+    try { fs.unlinkSync(file('session.bin')); } catch (_) { /* none */ }
+  }
+  accounts = list.filter((a) => a && a.id).map((a) => (a.token && a.expiresAt > Date.now() ? a : { ...a, token: '', expired: true }));
+}
+const accountId = (s) => `${s.region}:${s.username}`;
 
 // ---------- window & tray ----------
 function createWindow() {
@@ -81,14 +96,15 @@ function buildTrayMenu() {
   const autoStart = app.getLoginItemSettings(LOGIN_ITEM).openAtLogin;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show / hide', click: toggleWindow },
-    { label: 'Refresh status', click: () => hub && hub.refreshDevices().then(() => hub.pushAllEverywhere()).catch(() => {}) },
+    { label: 'Settings…', click: openSettings },
+    { label: 'Refresh status', click: refreshAll },
     { type: 'separator' },
     { label: 'Always on top', type: 'checkbox', checked: settings.alwaysOnTop, click: (i) => setAlwaysOnTop(i.checked) },
     { label: 'Notifications', type: 'checkbox', checked: settings.notify, click: (i) => { settings.notify = i.checked; saveSettings(); } },
     { label: 'Start with Windows', type: 'checkbox', checked: autoStart, click: (i) => app.setLoginItemSettings({ ...LOGIN_ITEM, openAtLogin: i.checked }) },
     { label: 'Reset window position', click: () => { settings.bounds = null; saveSettings(); const a = screen.getPrimaryDisplay().workArea; win.setBounds({ x: a.x + a.width - 400, y: a.y + 20, width: 380, height: 520 }); win.show(); } },
     { type: 'separator' },
-    { label: 'Sign out', click: logout },
+    { label: accounts.length > 1 ? 'Sign out of all accounts' : 'Sign out', click: logout },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
 }
@@ -135,41 +151,134 @@ function checkTransitions() {
   }
 }
 
-// ---------- hub ----------
+// ---------- accounts & hubs ----------
 function send() {
   if (win && !win.isDestroyed()) win.webContents.send('view', { ...view, alwaysOnTop: settings.alwaysOnTop });
 }
 
-async function startHub(sess) {
-  if (hub) hub.stop();
-  hub = new Hub(sess, settings.locked);
-  hub.on('locked', (list) => { settings.locked = list; saveSettings(); });
-  view = { screen: 'main', connection: 'connecting', message: 'Loading printers…', printers: [] };
-  send();
-  hub.on('update', (v) => {
-    if (v.connection === 'auth') { clearSession(); view = { screen: 'login', connection: null, message: v.message, printers: [] }; }
-    else view = { screen: 'main', ...v };
-    checkTransitions(); updateTray(); send();
+function openSettings() {
+  if (!win) return;
+  win.show(); win.focus();
+  win.webContents.send('openSettings');
+}
+
+const RANK = { online: 0, connecting: 1, offline: 2 };
+
+/** Merges the accounts' printers into one list in the user's order and builds what the window shows. */
+function compose() {
+  const accountList = accounts.map((a) => {
+    const r = runs.get(a.id);
+    return { id: a.id, label: a.label, region: a.region, status: a.expired ? 'expired' : (r ? r.view.connection : 'connecting'),
+      printers: r ? r.view.printers.length : 0 };
   });
+  if (adding || !accounts.some((a) => !a.expired)) {
+    view = { screen: 'login', adding: adding && accounts.some((a) => !a.expired), connection: null,
+      message: loginMessage, printers: [], all: [], accounts: accountList };
+    return;
+  }
+  const multi = accounts.length > 1;
+  const bySerial = new Map();
+  const notes = [];
+  let connection = 'online';
+  for (const a of accounts) {
+    if (a.expired) { notes.push(`${a.label}: sign-in expired. Open Settings to sign in again.`); continue; }
+    const r = runs.get(a.id);
+    const v = r ? r.view : { connection: 'connecting', message: null, printers: [] };
+    if ((RANK[v.connection] || 0) > RANK[connection]) connection = v.connection;
+    if (v.message) notes.push(multi ? `${a.label}: ${v.message}` : v.message);
+    // A printer shared with several of the accounts is shown once.
+    for (const p of v.printers) if (!bySerial.has(p.serial)) bySerial.set(p.serial, { ...p, account: a.label });
+  }
+  let added = false;
+  for (const s of bySerial.keys()) if (!settings.order.includes(s)) { settings.order.push(s); added = true; }
+  if (added) saveSettings();
+  const all = settings.order.filter((s) => bySerial.has(s)).map((s) => bySerial.get(s));
+  const hidden = new Set(settings.hidden);
+  view = {
+    screen: 'main', connection, message: notes.join('\n') || null, multi,
+    printers: all.filter((p) => !hidden.has(p.serial)),
+    all: all.map((p) => ({ serial: p.serial, name: p.name, model: p.model, account: p.account, hidden: hidden.has(p.serial) })),
+    accounts: accountList,
+  };
+}
+
+function refresh() { compose(); checkTransitions(); updateTray(); send(); }
+
+function stopAccount(id) {
+  const r = runs.get(id);
+  if (!r) return;
+  r.hub.stop(); clearTimeout(r.retry); runs.delete(id);
+}
+
+function expire(a, message) {
+  stopAccount(a.id);
+  a.expired = true; a.token = '';
+  saveAccounts();
+  loginMessage = accounts.length > 1 ? `${a.label}: ${message}` : message;
+  buildTrayMenu(); refresh();
+}
+
+async function startAccount(a) {
+  stopAccount(a.id);
+  const hub = new Hub(a, locked);
+  const run = { hub, view: { connection: 'connecting', message: 'Loading printers…', printers: [] }, retry: null };
+  runs.set(a.id, run);
+  hub.on('locked', () => { settings.locked = [...locked]; saveSettings(); });
+  hub.on('update', (v) => {
+    if (runs.get(a.id) !== run) return;
+    if (v.connection === 'auth') { expire(a, v.message); return; }
+    run.view = v; refresh();
+  });
+  refresh();
   try { await hub.start(); }
   catch (e) {
-    if (e.auth) { clearSession(); view = { screen: 'login', message: e.message, printers: [] }; }
-    else { view = { ...view, message: e.message }; setTimeout(() => startHub(sess), 60000); }
-    send();
+    if (runs.get(a.id) !== run) return;
+    if (e.auth) { expire(a, e.message); return; }
+    run.view = { ...run.view, connection: 'offline', message: e.message }; refresh();
+    run.retry = setTimeout(() => { if (runs.get(a.id) === run) startAccount(a); }, 60000);
   }
 }
 
-function logout() {
-  if (hub) hub.stop();
-  hub = null; clearSession(); previous.clear();
-  view = { screen: 'login', connection: null, message: null, printers: [] };
-  updateTray(); send();
+function refreshAll() {
+  for (const r of runs.values()) r.hub.refreshDevices().then(() => r.hub.pushAllEverywhere()).catch(() => {});
 }
 
-async function signedIn(sess) {
-  saveSession(sess);
-  await startHub(sess);
+function hubFor(serial) {
+  for (const r of runs.values()) if (r.hub.printers.has(serial)) return r.hub;
+  return null;
+}
+
+function removeAccount(id) {
+  stopAccount(id);
+  accounts = accounts.filter((a) => a.id !== id);
+  saveAccounts(); buildTrayMenu(); refresh();
+}
+
+function logout() {
+  for (const id of [...runs.keys()]) stopAccount(id);
+  accounts = []; saveAccounts(); previous.clear();
+  adding = false; loginMessage = null;
+  buildTrayMenu(); refresh();
+}
+
+function signedIn(sess, label) {
+  const id = accountId(sess);
+  const old = accounts.find((a) => a.id === id);
+  const a = { ...sess, id, label: String(label || '').trim() || (old && old.label) || sess.username };
+  accounts = old ? accounts.map((x) => (x.id === id ? a : x)) : [...accounts, a];
+  saveAccounts();
+  adding = false; loginMessage = null;
+  buildTrayMenu();
+  startAccount(a);
   return { status: 'ok' };
+}
+
+function setPrinters(order, hidden) {
+  const strings = (l) => (Array.isArray(l) ? l.filter((s) => typeof s === 'string') : []);
+  const o = strings(order);
+  settings.order = [...o, ...settings.order.filter((s) => !o.includes(s))];
+  settings.hidden = strings(hidden);
+  saveSettings(); refresh();
 }
 
 // ---------- IPC ----------
@@ -180,14 +289,18 @@ ipcMain.handle('getView', () => ({ ...view, alwaysOnTop: settings.alwaysOnTop })
 ipcMain.handle('login', wrap(async (email, password, region) => {
   login = new Login();
   const r = await login.start(email, password, region);
-  return r.status === 'ok' ? signedIn(r.session) : r;
+  return r.status === 'ok' ? signedIn(r.session, login.email) : r;
 }));
-ipcMain.handle('verifyCode', wrap(async (code) => signedIn(await login.verifyCode(code))));
-ipcMain.handle('verifyTfa', wrap(async (code) => signedIn(await login.verifyTfa(code))));
+ipcMain.handle('verifyCode', wrap(async (code) => signedIn(await login.verifyCode(code), login.email)));
+ipcMain.handle('verifyTfa', wrap(async (code) => signedIn(await login.verifyTfa(code), login.email)));
 ipcMain.handle('resendCode', wrap(async () => { await login.sendCode(); return { status: 'code' }; }));
-ipcMain.handle('useToken', wrap(async (token, region) => signedIn(await sessionFromToken(region === 'china' ? 'china' : 'global', token, 0))));
-ipcMain.handle('command', (_e, serial, cmd) => { if (hub) hub.command(String(serial), String(cmd)); });
-ipcMain.handle('unlock', (_e, serial) => { if (hub) hub.unlock(String(serial)); });
+ipcMain.handle('useToken', wrap(async (token, region, label) => signedIn(await sessionFromToken(region === 'china' ? 'china' : 'global', token, 0), label)));
+ipcMain.handle('addAccount', () => { adding = true; loginMessage = null; refresh(); });
+ipcMain.handle('cancelAdd', () => { adding = false; loginMessage = null; refresh(); });
+ipcMain.handle('removeAccount', (_e, id) => removeAccount(String(id)));
+ipcMain.handle('setPrinters', (_e, order, hidden) => setPrinters(order, hidden));
+ipcMain.handle('command', (_e, serial, cmd) => { const h = hubFor(String(serial)); if (h) h.command(String(serial), String(cmd)); });
+ipcMain.handle('unlock', (_e, serial) => { const h = hubFor(String(serial)); if (h) h.unlock(String(serial)); });
 ipcMain.handle('setAlwaysOnTop', (_e, on) => setAlwaysOnTop(on));
 ipcMain.handle('hide', () => win && win.hide());
 ipcMain.handle('logout', () => logout());
@@ -201,11 +314,13 @@ app.on('window-all-closed', (e) => e.preventDefault());
 
 app.whenReady().then(() => {
   loadSettings();
+  locked = new Set(settings.locked);
+  loadAccounts();
   createWindow();
   tray = new Tray(trayIcon('idle'));
   tray.setToolTip('Bambu Widget');
   tray.on('click', toggleWindow);
   buildTrayMenu();
-  const sess = loadSession();
-  if (sess) startHub(sess);
+  for (const a of accounts) if (!a.expired) startAccount(a);
+  refresh();
 });

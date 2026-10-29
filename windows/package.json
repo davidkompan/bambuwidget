@@ -1,7 +1,7 @@
 {
   "name": "bambu-widget",
   "productName": "Bambu Widget",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Desktop widget for all Bambu Lab printers in an account (via Bambu Cloud): progress, errors, pause/resume/stop, clear error.",
   "main": "main.js",
   "private": true,

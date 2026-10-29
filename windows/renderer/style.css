@@ -6,6 +6,9 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 13px/1.35 "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; }
 [hidden] { display: none !important; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: #3a3f4a; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 
 .bar { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
@@ -18,6 +21,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 button.icon { background: none; border: 0; color: var(--muted); font-size: 13px; padding: 4px 7px; border-radius: 4px; cursor: pointer; }
 button.icon:hover { background: var(--line); color: var(--text); }
 button.icon.on { color: var(--text); background: var(--line); }
+button.icon:disabled { opacity: .3; cursor: default; background: none; }
 
 main { height: calc(100% - 34px); overflow-y: auto; padding: 8px; }
 .notice { padding: 6px 8px; margin-bottom: 8px; border-radius: 6px; background: #3a2f17; color: #f3d9a4; font-size: 12px; }
@@ -27,8 +31,8 @@ main { height: calc(100% - 34px); overflow-y: auto; padding: 8px; }
 .card.s-paused { border-color: var(--amber); }
 .card.s-failed, .card.has-error { border-color: var(--red); }
 .row { display: flex; align-items: center; gap: 6px; }
-.head .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.head .model { color: var(--muted); font-size: 11px; }
+.head .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; max-width: 60%; }
+.head .model { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 100 auto; min-width: 0; }
 .head .label { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
 .s-printing .dot, .s-preparing .dot { background: var(--blue); }
@@ -84,3 +88,23 @@ button.primary:disabled { opacity: .6; }
 .locked { margin-top: 6px; padding: 3px 8px; border-radius: 5px; background: #262a33; color: var(--muted); font-size: 11.5px; }
 .locked b { color: var(--text); font-weight: 600; }
 .locked a { margin-left: 4px; color: var(--blue); text-decoration: none; }
+
+.settings { height: calc(100% - 34px); overflow-y: auto; padding: 4px 12px 16px; }
+.settings h3 { font-size: 13px; margin: 14px 0 2px; }
+.settings .hint { margin: 0 0 8px; }
+.s-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 5px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
+.s-row input[type=checkbox] { margin: 0; accent-color: var(--green); }
+.s-text { flex: 1; min-width: 0; display: flex; flex-direction: column; cursor: default; }
+.s-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s-sub { color: var(--muted); font-size: 11px; }
+.acc.expired .s-sub { color: var(--red); }
+.acc.online .s-sub { color: var(--muted); }
+button.small { background: #2a2e37; color: var(--text); border: 1px solid #353a45; border-radius: 5px;
+  padding: 3px 8px; font: inherit; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+button.small:hover { background: #343945; }
+button.small.danger { border-color: #6b2b2b; }
+button.small.danger.armed { background: var(--red); border-color: var(--red); }
+.settings button.primary { margin-top: 6px; }
+button.secondary { width: 100%; margin-top: 8px; padding: 7px; background: #2a2e37; color: var(--text);
+  border: 1px solid #353a45; border-radius: 5px; font: inherit; cursor: pointer; }

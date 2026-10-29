@@ -14,7 +14,8 @@ class Hub extends EventEmitter {
     super();
     this.sess = sess;
     // Printers whose firmware rejects unsigned commands (Bambu Authorization Control).
-    this.locked = new Set(locked);
+    // A Set passed in is shared with the other accounts' hubs.
+    this.locked = locked instanceof Set ? locked : new Set(locked);
     this.printers = new Map(); // serial -> {info, fields, received, lastUpdate, reply}
     this.client = null;
     this.connection = 'connecting';

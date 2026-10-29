@@ -22,9 +22,9 @@ final class Notifier {
 
     static void update(Context c) {
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (!Store.notification(c) || Store.session(c) == null) { nm.cancel(ID); return; }
+        if (!Store.notification(c) || !Store.signedIn(c)) { nm.cancel(ID); return; }
 
-        JSONArray ps = Store.printers(c);
+        JSONArray ps = Store.shownPrinters(c);
         // Collapsed: all printers side by side. Expanded: one block per printer (details dropped above 3
         // printers, Android limits the expanded height).
         RemoteViews small = new RemoteViews(c.getPackageName(), R.layout.notif_small);
